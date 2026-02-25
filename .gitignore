@@ -1,0 +1,16 @@
+# Environment variables
+.env
+
+# Virtual Environment
+.venv/
+uv.lock
+
+# Python cache
+__pycache__/
+
+# NoCom massive data files
+*.sql
+*.gz
+*.csv
+*.txt
+feather_chunks/
