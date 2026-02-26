@@ -100,7 +100,7 @@ def search_and_export(db_url, output_name, webhook_url):
     engine = create_engine(db_url)
     
     # 2. The targeted radius query
-        query = f"""
+    query = f"""
     WITH target_blocks AS (
         -- Step 1: Filter out everything except chests/shulkers to speed up math
         SELECT b.x, b.z
@@ -174,4 +174,5 @@ if __name__ == "__main__":
     # feather_to_postgres('feather_chunks', DB_URL, 'blocks')
     
     # STEP 3: Search Database -> Export -> Discord
-    search_and_export(DB_URL, min_chests=20, output_name='massive_stashes', webhook_url=WEBHOOK_URL)
+    search_and_export(DB_URL, output_name='targeted_stashes', webhook_url=WEBHOOK_URL)
+
