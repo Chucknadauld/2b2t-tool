@@ -83,21 +83,45 @@ def send_to_discord(webhook_url, file_path, stash_count, min_chests):
     print("Sent Xaero waypoints to Discord Webhook.")
 
 # Step 7, 8, 9 & 10: PostgreSQL Query -> CSV + Xaero Waypoints -> Discord
-def search_and_export(db_url, min_chests, output_name, webhook_url):
-    print(f"\nExecuting SQL Query for {min_chests}+ chests...")
+def search_and_export(db_url, output_name, webhook_url):
+    # 1. Read the search parameters from the config file
+    with open('search_config.json', 'r') as f:
+        config = json.load(f)
+        
+    min_chests = config['min_chests']
+    c1 = config['corner1']
+    c2 = config['corner2']
+    
+    # Automatically figure out the true Min and Max, regardless of how you typed them
+    min_x, max_x = min(c1['x'], c2['x']), max(c1['x'], c2['x'])
+    min_z, max_z = min(c1['z'], c2['z']), max(c1['z'], c2['z'])
+
+    print(f"\nSearching for {min_chests}+ chests between X:[{min_x} to {max_x}] and Z:[{min_z} to {max_z}]...")
     engine = create_engine(db_url)
     
-    # Query groups chests by 16x16 chunk grid to find clustered stash bases
-    query = f"""
+    # 2. The targeted radius query
+        query = f"""
+    WITH target_blocks AS (
+        -- Step 1: Filter out everything except chests/shulkers to speed up math
+        SELECT b.x, b.z
+        FROM blocks b
+        JOIN block_states bs ON b.blockstate_id = bs.id
+        WHERE bs.block_name LIKE '%%chest%%' OR bs.block_name LIKE '%%shulker_box%%'
+    )
+    -- Step 2: For every chest, count how many chests are within a 32-block radius
     SELECT 
-        FLOOR(b.x/16)*16 AS x, 
-        FLOOR(b.z/16)*16 AS z, 
-        COUNT(*) as chest_count
-    FROM blocks b
-    JOIN block_states bs ON b.blockstate_id = bs.id
-    WHERE bs.block_name LIKE '%%chest%%' OR bs.block_name LIKE '%%shulker_box%%'
-    GROUP BY FLOOR(b.x/16)*16, FLOOR(b.z/16)*16
-    HAVING COUNT(*) >= {min_chests}
+        t1.x, 
+        t1.z, 
+        COUNT(t2.x) as chest_count
+    FROM target_blocks t1
+    JOIN target_blocks t2 
+        -- Bounding box check (fast)
+        ON t2.x BETWEEN t1.x - 32 AND t1.x + 32
+        AND t2.z BETWEEN t1.z - 32 AND t1.z + 32
+        -- True radius math check (accurate)
+        AND POWER(t1.x - t2.x, 2) + POWER(t1.z - t2.z, 2) <= 1024 
+    GROUP BY t1.x, t1.z
+    HAVING COUNT(t2.x) >= {min_chests}
     ORDER BY chest_count DESC;
     """
     
