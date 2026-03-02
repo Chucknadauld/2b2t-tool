@@ -89,8 +89,14 @@ def search_and_export(db_url, output_name, webhook_url):
         config = json.load(f)
         
     min_chests = config['min_chests']
+    search_diameter = config.get('search_diameter', 4) # Defaults to 4 if missing
     c1 = config['corner1']
     c2 = config['corner2']
+
+    # Math: (Chunks * 16 blocks per chunk) / 2 = Radius.
+    radius = (search_diameter * 16) / 2
+    squared_radius = int(radius ** 2)
+
     
     # Automatically figure out the true Min and Max, regardless of how you typed them
     min_x, max_x = min(c1['x'], c2['x']), max(c1['x'], c2['x'])
@@ -99,7 +105,7 @@ def search_and_export(db_url, output_name, webhook_url):
     print(f"\nSearching for {min_chests}+ chests between X:[{min_x} to {max_x}] and Z:[{min_z} to {max_z}]...")
     engine = create_engine(db_url)
     
-    # 2. The targeted radius query
+        # 2. The targeted radius query
     query = f"""
     WITH target_blocks AS (
         -- Step 1: Filter out everything except chests/shulkers to speed up math
@@ -107,8 +113,10 @@ def search_and_export(db_url, output_name, webhook_url):
         FROM blocks b
         JOIN block_states bs ON b.blockstate_id = bs.id
         WHERE bs.block_name LIKE '%%chest%%' OR bs.block_name LIKE '%%shulker_box%%'
+        AND b.x BETWEEN {min_x} AND {max_x}
+        AND b.z BETWEEN {min_z} AND {max_z}
     )
-    -- Step 2: For every chest, count how many chests are within a 32-block radius
+    -- Step 2: For every chest, count how many chests are within the radius
     SELECT 
         t1.x, 
         t1.z, 
@@ -116,14 +124,15 @@ def search_and_export(db_url, output_name, webhook_url):
     FROM target_blocks t1
     JOIN target_blocks t2 
         -- Bounding box check (fast)
-        ON t2.x BETWEEN t1.x - 32 AND t1.x + 32
-        AND t2.z BETWEEN t1.z - 32 AND t1.z + 32
+        ON t2.x BETWEEN t1.x - {radius} AND t1.x + {radius}
+        AND t2.z BETWEEN t1.z - {radius} AND t1.z + {radius}
         -- True radius math check (accurate)
-        AND POWER(t1.x - t2.x, 2) + POWER(t1.z - t2.z, 2) <= 1024 
+        AND POWER(t1.x - t2.x, 2) + POWER(t1.z - t2.z, 2) <= {squared_radius}
     GROUP BY t1.x, t1.z
     HAVING COUNT(t2.x) >= {min_chests}
     ORDER BY chest_count DESC;
     """
+
     
     results_df = pd.read_sql(query, engine)
     stash_count = len(results_df)
@@ -150,29 +159,25 @@ def search_and_export(db_url, output_name, webhook_url):
 
 
 if __name__ == "__main__":
-    DB_URL = os.getenv("DB_URL")
-    WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
-    
+    DB_URL = os.getenv('DB_URL')
+    WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
+
     if not DB_URL:
         print("Error: Missing DB_URL in .env file.")
         exit(1)
-        
-    # --- PIPELINE ---
-    # Uncomment Step 1 and Step 2 ONCE when the download finishes. 
-    # Once the data is in PostgreSQL, you can comment them back out.
 
-    # Data Paths (Ensure these match where you extracted the files on your external drive)
-    BLOCKS_SQL_PATH = '/Volumes/ExtDrive/NocomData/blocks.sql'
-    STATES_SQL_PATH = '/Volumes/ExtDrive/NocomData/block_states.sql'
+    # 1. Data Paths (Ensure these point to your external drive)
+    BLOCKS_SQL_PATH = '/Volumes/ExtDrive/NocomData/nocom/blocks.sql'
+    STATES_SQL_PATH = '/Volumes/ExtDrive/NocomData/nocom/block_states.sql'
+    FEATHER_DIR = './feather_data'
 
-    # STEP 1: Parse Text Files -> Save as Feather
-    # raw_to_feather(STATES_SQL_PATH, 'block_states', ['id', 'block_name'], 'feather_chunks')
-    # raw_to_feather(BLOCKS_SQL_PATH, 'blocks', ['x', 'y', 'z', 'blockstate_id'], 'feather_chunks')
-    
-    # STEP 2: Load Feather -> Push to PostgreSQL
-    # feather_to_postgres('feather_chunks', DB_URL, 'block_states')
-    # feather_to_postgres('feather_chunks', DB_URL, 'blocks')
-    
-    # STEP 3: Search Database -> Export -> Discord
+    # 2. Extract and chunk the raw text files to Feather
+    raw_to_feather(BLOCKS_SQL_PATH, 'blocks', ['x', 'y', 'z', 'blockstate_id'], FEATHER_DIR)
+    raw_to_feather(STATES_SQL_PATH, 'block_states', ['id', 'block_name'], FEATHER_DIR)
+
+    # 3. Load Feather chunks into PostgreSQL
+    feather_to_postgres(FEATHER_DIR, DB_URL, 'blocks')
+    feather_to_postgres(FEATHER_DIR, DB_URL, 'block_states')
+
+    # 4. Run the targeted search!
     search_and_export(DB_URL, output_name='targeted_stashes', webhook_url=WEBHOOK_URL)
-
