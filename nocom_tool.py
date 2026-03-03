@@ -10,50 +10,50 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-# Step 1: Optimized raw SQL dump parser
-def parse_sql_dump(filepath, table_name):
-    """
-    Generator that yields batches of rows from a raw SQL dump.
-    Optimized to read massive files line-by-line without filling RAM.
-    """
-    print(f"Reading {filepath}...")
-    # Regex to capture the values inside the parentheses of an INSERT statement
-    pattern = re.compile(r"\((.*?)\)") 
+# # Step 1: Optimized raw SQL dump parser
+# def parse_sql_dump(filepath, table_name):
+#     """
+#     Generator that yields batches of rows from a raw SQL dump.
+#     Optimized to read massive files line-by-line without filling RAM.
+#     """
+#     print(f"Reading {filepath}...")
+#     # Regex to capture the values inside the parentheses of an INSERT statement
+#     pattern = re.compile(r"\((.*?)\)") 
     
-    with open(filepath, 'r', encoding='utf-8') as f:
-        for line in f:
-            if line.startswith(f"INSERT INTO `{table_name}`") or line.startswith(f"INSERT INTO {table_name}"):
-                # Find all (x, y, z, id) blocks in this specific INSERT line
-                matches = pattern.findall(line)
-                for match in matches:
-                    # Split by comma and strip any rogue quotes/spaces
-                    yield [val.strip().strip("'") for val in match.split(',')]
+#     with open(filepath, 'r', encoding='utf-8') as f:
+#         for line in f:
+#             if line.startswith(f"INSERT INTO `{table_name}`") or line.startswith(f"INSERT INTO {table_name}"):
+#                 # Find all (x, y, z, id) blocks in this specific INSERT line
+#                 matches = pattern.findall(line)
+#                 for match in matches:
+#                     # Split by comma and strip any rogue quotes/spaces
+#                     yield [val.strip().strip("'") for val in match.split(',')]
 
-# Step 2, 3 & 4: Chunk data and save to Feather format for ultra-fast I/O
-def raw_to_feather(input_file, table_name, columns, output_dir, chunksize=500000):
-    os.makedirs(output_dir, exist_ok=True)
-    chunk_index = 0
-    data = []
+# # Step 2, 3 & 4: Chunk data and save to Feather format for ultra-fast I/O
+# def raw_to_feather(input_file, table_name, columns, output_dir, chunksize=500000):
+#     os.makedirs(output_dir, exist_ok=True)
+#     chunk_index = 0
+#     data = []
     
-    print(f"Extracting '{table_name}' and saving to Feather chunks...")
-    for row in parse_sql_dump(input_file, table_name):
-        data.append(row)
+#     print(f"Extracting '{table_name}' and saving to Feather chunks...")
+#     for row in parse_sql_dump(input_file, table_name):
+#         data.append(row)
         
-        # When we hit chunksize, write to a feather file and clear RAM
-        if len(data) >= chunksize:
-            df = pd.DataFrame(data, columns=columns)
-            feather_path = os.path.join(output_dir, f'{table_name}_chunk_{chunk_index}.feather')
-            feather.write_feather(df, feather_path)
-            print(f"Saved {feather_path}")
-            data = []
-            chunk_index += 1
+#         # When we hit chunksize, write to a feather file and clear RAM
+#         if len(data) >= chunksize:
+#             df = pd.DataFrame(data, columns=columns)
+#             feather_path = os.path.join(output_dir, f'{table_name}_chunk_{chunk_index}.feather')
+#             feather.write_feather(df, feather_path)
+#             print(f"Saved {feather_path}")
+#             data = []
+#             chunk_index += 1
             
-    # Save the final remainder chunk
-    if data:
-        df = pd.DataFrame(data, columns=columns)
-        feather_path = os.path.join(output_dir, f'{table_name}_chunk_{chunk_index}.feather')
-        feather.write_feather(df, feather_path)
-        print(f"Saved final chunk: {feather_path}")
+#     # Save the final remainder chunk
+#     if data:
+#         df = pd.DataFrame(data, columns=columns)
+#         feather_path = os.path.join(output_dir, f'{table_name}_chunk_{chunk_index}.feather')
+#         feather.write_feather(df, feather_path)
+#         print(f"Saved final chunk: {feather_path}")
 
 # Step 5 & 6: Load Feather chunks directly into PostgreSQL
 def feather_to_postgres(feather_dir, db_url, table_name):
@@ -111,10 +111,11 @@ def search_and_export(db_url, output_name, webhook_url):
         -- Step 1: Filter out everything except chests/shulkers to speed up math
         SELECT b.x, b.z
         FROM blocks b
-        JOIN block_states bs ON b.blockstate_id = bs.id
-        WHERE bs.block_name LIKE '%%chest%%' OR bs.block_name LIKE '%%shulker_box%%'
+        JOIN block_states bs ON b.block_state = bs.block_state
+        WHERE (bs.name LIKE '%%chest%%' OR bs.name LIKE '%%shulker_box%%')
         AND b.x BETWEEN {min_x} AND {max_x}
         AND b.z BETWEEN {min_z} AND {max_z}
+
     )
     -- Step 2: For every chest, count how many chests are within the radius
     SELECT 
@@ -171,13 +172,13 @@ if __name__ == "__main__":
     STATES_SQL_PATH = '/Volumes/ExtDrive/NocomData/nocom/block_states.sql'
     FEATHER_DIR = './feather_data'
 
-    # 2. Extract and chunk the raw text files to Feather
-    raw_to_feather(BLOCKS_SQL_PATH, 'blocks', ['x', 'y', 'z', 'blockstate_id'], FEATHER_DIR)
-    raw_to_feather(STATES_SQL_PATH, 'block_states', ['id', 'block_name'], FEATHER_DIR)
+    # # 2. Extract and chunk the raw text files to Feather
+    # raw_to_feather(BLOCKS_SQL_PATH, 'blocks', ['x', 'y', 'z', 'blockstate_id'], FEATHER_DIR)
+    # raw_to_feather(STATES_SQL_PATH, 'block_states', ['id', 'block_name'], FEATHER_DIR)
 
-    # 3. Load Feather chunks into PostgreSQL
-    feather_to_postgres(FEATHER_DIR, DB_URL, 'blocks')
-    feather_to_postgres(FEATHER_DIR, DB_URL, 'block_states')
+    # # 3. Load Feather chunks into PostgreSQL
+    # feather_to_postgres(FEATHER_DIR, DB_URL, 'blocks')
+    # feather_to_postgres(FEATHER_DIR, DB_URL, 'block_states')
 
     # 4. Run the targeted search!
     search_and_export(DB_URL, output_name='targeted_stashes', webhook_url=WEBHOOK_URL)
